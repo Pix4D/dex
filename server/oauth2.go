@@ -298,7 +298,7 @@ func (s *Server) newIDToken(clientID string, claims storage.Claims, scopes []str
 	}
 
 	tok := idTokenClaims{
-		Issuer:   s.issuerURL.String(),
+		Issuer:   s.internalIssuerURL.String(),
 		Subject:  subjectString,
 		Nonce:    nonce,
 		Expiry:   expiry.Unix(),

@@ -56,13 +56,13 @@ func loadTemplates(c WebConfig, issuerURL string) (*templates, error) {
 		c.Issuer = "dex"
 	}
 
-	if c.LogoURL == "" {
-		c.LogoURL = join(issuerURL, "themes", c.Theme, "logo.png")
-	}
-
 	hostURL := issuerURL
 	if c.HostURL != "" {
 		hostURL = c.HostURL
+	}
+
+	if c.LogoURL == "" {
+		c.LogoURL = join(hostURL, "themes", c.Theme, "logo.png")
 	}
 
 	funcs := template.FuncMap{

@@ -51,7 +51,8 @@ type Connector struct {
 //
 // Multiple servers using the same storage are expected to be configured identically.
 type Config struct {
-	Issuer string
+	InternalIssuerURL string
+	ExternalIssuerURL string
 
 	// The backing persistence layer.
 	Storage storage.Storage
@@ -124,7 +125,8 @@ func value(val, defaultValue time.Duration) time.Duration {
 
 // Server is the top level object.
 type Server struct {
-	issuerURL url.URL
+	internalIssuerURL url.URL
+	externalIssuerURL url.URL
 
 	// mutex for the connectors map.
 	mu sync.Mutex
@@ -165,7 +167,12 @@ func newServer(ctx context.Context, c Config, rotationStrategy rotationStrategy)
 		c.Logger = logrus.New()
 	}
 
-	issuerURL, err := url.Parse(c.Issuer)
+	internalIssuerURL, err := url.Parse(c.InternalIssuerURL)
+	if err != nil {
+		return nil, fmt.Errorf("server: can't parse issuer URL")
+	}
+
+	externalIssuerURL, err := url.Parse(c.ExternalIssuerURL)
 	if err != nil {
 		return nil, fmt.Errorf("server: can't parse issuer URL")
 	}
@@ -191,13 +198,14 @@ func newServer(ctx context.Context, c Config, rotationStrategy rotationStrategy)
 		c.Now = time.Now
 	}
 
-	templates, err := loadTemplates(c.Web, c.Issuer)
+	templates, err := loadTemplates(c.Web, c.ExternalIssuerURL)
 	if err != nil {
 		return nil, fmt.Errorf("server: failed to templates: %v", err)
 	}
 
 	s := &Server{
-		issuerURL:              *issuerURL,
+		internalIssuerURL:      *internalIssuerURL,
+		externalIssuerURL:      *externalIssuerURL,
 		connectors:             make(map[string]Connector),
 		storage:                newKeyCacher(c.Storage, c.Now),
 		supportedResponseTypes: supported,
@@ -228,9 +236,11 @@ func newServer(ctx context.Context, c Config, rotationStrategy rotationStrategy)
 
 	r := mux.NewRouter()
 
+	baseRoutePath := internalIssuerURL.Path
+
 	handleFunc := func(p string, h http.HandlerFunc) {
-		// r.HandleFunc(path.Join(issuerURL.Path, p), instrumentHandlerCounter(p, h))
-		r.HandleFunc(path.Join(issuerURL.Path, p), h)
+		// r.HandleFunc(path.Join(baseRoutePath, p), instrumentHandlerCounter(p, h))
+		r.HandleFunc(path.Join(baseRoutePath, p), h)
 	}
 
 	if c.PrometheusRegistry != nil {
@@ -250,12 +260,12 @@ func newServer(ctx context.Context, c Config, rotationStrategy rotationStrategy)
 			})
 		}
 		handleFunc = func(p string, h http.HandlerFunc) {
-			r.HandleFunc(path.Join(issuerURL.Path, p), instrumentHandlerCounter(p, h))
+			r.HandleFunc(path.Join(baseRoutePath, p), instrumentHandlerCounter(p, h))
 		}
 	}
 
 	handlePrefix := func(p string, h http.Handler) {
-		prefix := path.Join(issuerURL.Path, p)
+		prefix := path.Join(baseRoutePath, p)
 		r.PathPrefix(prefix).Handler(http.StripPrefix(prefix, h))
 	}
 	handleWithCORS := func(p string, h http.HandlerFunc) {
@@ -264,7 +274,7 @@ func newServer(ctx context.Context, c Config, rotationStrategy rotationStrategy)
 			corsOption := handlers.AllowedOrigins(c.AllowedOrigins)
 			handler = handlers.CORS(corsOption)(handler)
 		}
-		r.Handle(path.Join(issuerURL.Path, p), handler)
+		r.Handle(path.Join(baseRoutePath, p), handler)
 	}
 	r.NotFoundHandler = http.HandlerFunc(http.NotFound)
 
@@ -279,7 +289,7 @@ func newServer(ctx context.Context, c Config, rotationStrategy rotationStrategy)
 	handleWithCORS("/keys", s.handlePublicKeys)
 	handleFunc("/auth", s.handleAuthorization)
 	handleFunc("/auth/{connector}", s.handleConnectorLogin)
-	r.HandleFunc(path.Join(issuerURL.Path, "/callback"), func(w http.ResponseWriter, r *http.Request) {
+	r.HandleFunc(path.Join(baseRoutePath, "/callback"), func(w http.ResponseWriter, r *http.Request) {
 		// Strip the X-Remote-* headers to prevent security issues on
 		// misconfigured authproxy connector setups.
 		for key := range r.Header {
@@ -309,13 +319,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) absPath(pathItems ...string) string {
 	paths := make([]string, len(pathItems)+1)
-	paths[0] = s.issuerURL.Path
+	paths[0] = s.internalIssuerURL.Path
 	copy(paths[1:], pathItems)
 	return path.Join(paths...)
 }
 
 func (s *Server) absURL(pathItems ...string) string {
-	u := s.issuerURL
+	u := s.externalIssuerURL
 	u.Path = s.absPath(pathItems...)
 	return u.String()
 }

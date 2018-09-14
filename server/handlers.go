@@ -105,7 +105,7 @@ type discovery struct {
 
 func (s *Server) discoveryHandler() (http.HandlerFunc, error) {
 	d := discovery{
-		Issuer:      s.issuerURL.String(),
+		Issuer:      s.internalIssuerURL.String(),
 		Auth:        s.absURL("/auth"),
 		Token:       s.absURL("/token"),
 		Keys:        s.absURL("/keys"),
@@ -430,7 +430,7 @@ func (s *Server) finalizeLogin(identity connector.Identity, authReq storage.Auth
 	s.logger.Infof("login successful: connector %q, username=%q, email=%q, groups=%q",
 		authReq.ConnectorID, claims.Username, email, claims.Groups)
 
-	return path.Join(s.issuerURL.Path, "/approval") + "?req=" + authReq.ID, nil
+	return path.Join(s.internalIssuerURL.Path, "/approval") + "?req=" + authReq.ID, nil
 }
 
 func (s *Server) handleApproval(w http.ResponseWriter, r *http.Request) {
